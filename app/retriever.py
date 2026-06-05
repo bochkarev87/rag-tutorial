@@ -1,69 +1,44 @@
-"""Retrieval: загрузка TF-IDF индекса и поиск top-k по cosine similarity."""
-
+import json
 import pickle
+import numpy as np
+from scipy.sparse import csr_matrix
+from sklearn.metrics.pairwise import cosine_similarity
 from pathlib import Path
 
-import scipy.sparse
-from sklearn.metrics.pairwise import cosine_similarity
-
-from app.chunker import load_documents
-from app.config import (
-    INDEX_CHUNKS_JSONL,
-    MATRIX_NPZ,
-    TOP_K,
-    VECTORIZER_PKL,
-)
-
+PROJECT_ROOT = Path(__file__).parent.parent
+VECTORIZER_PATH = PROJECT_ROOT / "data" / "index" / "vectorizer.pkl"
+MATRIX_PATH = PROJECT_ROOT / "data" / "index" / "matrix.npz"
+INDEX_CHUNKS_PATH = PROJECT_ROOT / "data" / "index" / "chunks.jsonl"
 
 class Retriever:
-    def __init__(
-        self,
-        vectorizer_path: Path = VECTORIZER_PKL,
-        matrix_path: Path = MATRIX_NPZ,
-        chunks_path: Path = INDEX_CHUNKS_JSONL,
-    ) -> None:
-        self.vectorizer = self._load_vectorizer(vectorizer_path)
-        self.matrix = self._load_matrix(matrix_path)
-        self.chunks = load_documents(chunks_path)
+    def __init__(self):
+        self.vectorizer = None
+        self.tfidf_matrix = None
+        self.chunks = []
+        self._load_index()
 
-        if self.matrix.shape[0] != len(self.chunks):
-            raise ValueError("Число строк матрицы не совпадает с числом чанков")
+    def _load_index(self):
+        if not VECTORIZER_PATH.exists():
+            raise FileNotFoundError(f"Index not found: {VECTORIZER_PATH}")
+        with open(VECTORIZER_PATH, "rb") as f:
+            self.vectorizer = pickle.load(f)
+        loaded = np.load(MATRIX_PATH)
+        self.tfidf_matrix = csr_matrix((loaded['data'], loaded['indices'], loaded['indptr']), shape=loaded['shape'])
+        with open(INDEX_CHUNKS_PATH, "r", encoding="utf-8") as f:
+            self.chunks = [json.loads(line) for line in f]
 
-    @staticmethod
-    def _load_vectorizer(path: Path):
-        if not path.exists():
-            raise FileNotFoundError(
-                f"Индекс не найден: {path}. Запустите: uv run python scripts/build_index.py"
-            )
-        with path.open("rb") as f:
-            return pickle.load(f)
-
-    @staticmethod
-    def _load_matrix(path: Path) -> scipy.sparse.csr_matrix:
-        if not path.exists():
-            raise FileNotFoundError(
-                f"Индекс не найден: {path}. Запустите: uv run python scripts/build_index.py"
-            )
-        return scipy.sparse.load_npz(path)
-
-    def search(self, query: str, k: int = TOP_K) -> list[dict]:
-        if not query.strip():
-            return []
-
-        k = min(k, len(self.chunks))
-        query_vec = self.vectorizer.transform([query.strip()])
-        scores = cosine_similarity(query_vec, self.matrix).flatten()
-
-        top_indices = scores.argsort()[::-1][:k]
+    def search(self, query: str, k: int = 3):
+        q_vec = self.vectorizer.transform([query])
+        sim = cosine_similarity(q_vec, self.tfidf_matrix).flatten()
+        top_idx = np.argsort(sim)[::-1][:k]
         results = []
-        for idx in top_indices:
+        for idx in top_idx:
+            score = float(sim[idx])
             chunk = self.chunks[idx]
-            results.append(
-                {
-                    "text": chunk["text"],
-                    "doc_id": chunk["doc_id"],
-                    "name": chunk["name"],
-                    "score": float(scores[idx]),
-                }
-            )
+            meta = {
+                "doc_id": chunk["doc_id"],
+                "name": chunk.get("name", ""),
+                "chunk_id": chunk["chunk_id"]
+            }
+            results.append((chunk["text"], meta, score))
         return results

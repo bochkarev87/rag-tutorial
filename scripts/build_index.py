@@ -1,68 +1,81 @@
-"""Build TF-IDF index: ingest + chunk + fit + save."""
-
-import pickle
-import shutil
 import sys
+import json
+import pickle
+import numpy as np
+import shutil
 from pathlib import Path
 
-import scipy.sparse
-from sklearn.feature_extraction.text import TfidfVectorizer
+PROJECT_ROOT = Path(__file__).parent.parent
+sys.path.append(str(PROJECT_ROOT))
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / "scripts"))
+DOCUMENTS_JSONL = PROJECT_ROOT / "data" / "processed" / "documents.jsonl"
+CHUNKS_JSONL = PROJECT_ROOT / "data" / "processed" / "chunks.jsonl"
+DATA_INDEX = PROJECT_ROOT / "data" / "index"
+VECTORIZER_PATH = DATA_INDEX / "vectorizer.pkl"
+MATRIX_PATH = DATA_INDEX / "matrix.npz"
+INDEX_CHUNKS_PATH = DATA_INDEX / "chunks.jsonl"
 
-from app.chunker import load_documents, run as chunk_run
-from app.config import (
-    CHUNKS_JSONL,
-    DATA_INDEX,
-    INDEX_CHUNKS_JSONL,
-    MATRIX_NPZ,
-    VECTORIZER_PKL,
-)
-from ingest import run as ingest_run
+def run_ingest():
+    DATASETS_JSON = PROJECT_ROOT / "data" / "raw" / "datasets.json"
+    with open(DATASETS_JSON, "r", encoding="utf-8") as f:
+        data = json.load(f)
+        datasets = data["datasets"]
+    DOCUMENTS_JSONL.parent.mkdir(parents=True, exist_ok=True)
+    with open(DOCUMENTS_JSONL, "w", encoding="utf-8") as out:
+        for rec in datasets:
+            doc = {
+                "doc_id": str(rec["id"]),
+                "name": rec["name"],
+                "text": rec["text"],
+                "source_file": "datasets.json"
+            }
+            out.write(json.dumps(doc, ensure_ascii=False) + "\n")
+    print(f"Создано {len(datasets)} документов")
 
+def chunk_documents():
+    chunks = []
+    with open(DOCUMENTS_JSONL, "r", encoding="utf-8") as f:
+        for line in f:
+            doc = json.loads(line)
+            chunks.append({
+                "chunk_id": f"{doc['doc_id']}_0",
+                "doc_id": doc["doc_id"],
+                "name": doc.get("name", ""),
+                "text": doc["text"],
+                "metadata": {}
+            })
+    CHUNKS_JSONL.parent.mkdir(parents=True, exist_ok=True)
+    with open(CHUNKS_JSONL, "w", encoding="utf-8") as f:
+        for ch in chunks:
+            f.write(json.dumps(ch, ensure_ascii=False) + "\n")
+    print(f"Создано {len(chunks)} чанков")
 
-def build_tfidf(texts: list[str]) -> tuple[TfidfVectorizer, scipy.sparse.csr_matrix]:
-    vectorizer = TfidfVectorizer()
-    matrix = vectorizer.fit_transform(texts)
-    return vectorizer, matrix
-
-
-def save_index(
-    vectorizer: TfidfVectorizer,
-    matrix: scipy.sparse.csr_matrix,
-    chunks_path: Path = CHUNKS_JSONL,
-) -> int:
-    DATA_INDEX.mkdir(parents=True, exist_ok=True)
-
-    with VECTORIZER_PKL.open("wb") as f:
-        pickle.dump(vectorizer, f)
-
-    scipy.sparse.save_npz(MATRIX_NPZ, matrix)
-    shutil.copy2(chunks_path, INDEX_CHUNKS_JSONL)
-    return matrix.shape[0]
-
-
-def run() -> int:
-    doc_count = ingest_run()
-    chunk_count = chunk_run()
-    chunks = load_documents(CHUNKS_JSONL)
+def build():
+    if not DOCUMENTS_JSONL.exists():
+        print("Запуск ingestion...")
+        run_ingest()
+    if not CHUNKS_JSONL.exists():
+        print("Запуск chunking...")
+        chunk_documents()
+    print("Загрузка чанков...")
+    chunks = []
+    with open(CHUNKS_JSONL, "r", encoding="utf-8") as f:
+        for line in f:
+            chunks.append(json.loads(line))
     texts = [c["text"] for c in chunks]
-
-    if not texts:
-        raise ValueError("Нет чанков для индексации")
-
-    vectorizer, matrix = build_tfidf(texts)
-    save_index(vectorizer, matrix)
-    print(f"Документов: {doc_count}, чанков: {chunk_count}, матрица: {matrix.shape}")
-    return chunk_count
-
-
-def main() -> None:
-    run()
-    print(f"Индекс сохранён -> {DATA_INDEX}")
-
+    print(f"Всего чанков: {len(texts)}")
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from scipy.sparse import csr_matrix
+    vectorizer = TfidfVectorizer(max_features=5000, lowercase=True)
+    tfidf = vectorizer.fit_transform(texts)
+    print(f"Размер матрицы: {tfidf.shape}")
+    DATA_INDEX.mkdir(parents=True, exist_ok=True)
+    with open(VECTORIZER_PATH, "wb") as f:
+        pickle.dump(vectorizer, f)
+    csr = csr_matrix(tfidf)
+    np.savez(MATRIX_PATH, data=csr.data, indices=csr.indices, indptr=csr.indptr, shape=csr.shape)
+    shutil.copy2(CHUNKS_JSONL, INDEX_CHUNKS_PATH)
+    print("Индекс готов.")
 
 if __name__ == "__main__":
-    main()
+    build()

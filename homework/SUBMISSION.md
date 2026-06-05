@@ -1,15 +1,16 @@
-# Submission
+# Домашнее задание: RAG Киноассистент
 
-Заполните файл перед отправкой PR.
+## Ссылка на репозиторий
+https://github.com/bochkarev87/ragmovieassistant
 
-## Ссылка на репозиторий с заданием
+## Что сделано
+- Полный RAG pipeline (ingest → chunking → index → retrieval → answer → UI)
+- 11 фильмов в датасете
+- Streamlit интерфейс с источниками
+- Negative-вопрос даёт отказ
 
-- Repo URL: `<вставьте ссылку на ваш репозиторий>`
-
-## Автор
-
-- ФИО / ник: `<укажите>`
-
-## Комментарий
-
-- Кратко: что реализовано, какие данные использованы, что улучшено.
+## Запуск
+```bash
+uv sync
+uv run python scripts/build_index.py
+uv run streamlit run app/main.py

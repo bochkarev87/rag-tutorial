@@ -1,19 +1,23 @@
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).parent.parent
 
-DATA_RAW = ROOT / "data" / "raw"
-DATA_PROCESSED = ROOT / "data" / "processed"
-DATA_INDEX = ROOT / "data" / "index"
+DATA_RAW = PROJECT_ROOT / "data" / "raw"
+DATA_PROCESSED = PROJECT_ROOT / "data" / "processed"
+DATA_INDEX = PROJECT_ROOT / "data" / "index"
 
-RAW_DATASETS = DATA_RAW / "datasets.json"
+TOP_K = 3
+SIMILARITY_THRESHOLD = 0.1
+CHUNK_SIZE = 500
+CHUNK_OVERLAP = 50
+
+DATASETS_JSON = DATA_RAW / "datasets.json"
 DOCUMENTS_JSONL = DATA_PROCESSED / "documents.jsonl"
 CHUNKS_JSONL = DATA_PROCESSED / "chunks.jsonl"
 
-VECTORIZER_PKL = DATA_INDEX / "vectorizer.pkl"
-MATRIX_NPZ = DATA_INDEX / "matrix.npz"
-INDEX_CHUNKS_JSONL = DATA_INDEX / "chunks.jsonl"
+VECTORIZER_PATH = DATA_INDEX / "vectorizer.pkl"
+MATRIX_PATH = DATA_INDEX / "matrix.npz"
+INDEX_CHUNKS_PATH = DATA_INDEX / "chunks.jsonl"
 
-TOP_K = 3
-CHUNK_MAX_CHARS = 400
-CHUNK_OVERLAP = 50
+for path in [DATA_RAW, DATA_PROCESSED, DATA_INDEX]:
+    path.mkdir(parents=True, exist_ok=True)
